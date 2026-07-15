@@ -676,6 +676,26 @@
 </div>
 <div class="card">
     <div class="card-header-row">
+        <h2>📖 Wiki Chat Companion</h2>
+        <button class="expand-btn" onclick="toggleFocusMode(this.closest('.card'))">⛶</button>
+    </div>
+    <p style="font-size: 0.8rem; margin: 0 0 10px 0; opacity: 0.8;">Ask me about any topic, and I will extract the answers live from Wikipedia!</p>
+    
+    <div id="wiki-chat-box" style="display: flex; flex-direction: column; flex-grow: 1; min-height: 180px; max-height: 240px; justify-content: space-between;">
+        <div id="wiki-chat-messages" style="flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; padding: 10px; border-radius: 12px; background: rgba(0,0,0,0.02); max-height: 170px;">
+            <div class="wiki-msg bot" style="align-self: flex-start; background: rgba(226, 187, 240, 0.2); padding: 8px 12px; border-radius: 12px 12px 12px 0; font-size: 0.85rem; max-width: 85%; border-left: 3px solid var(--accent-purple);">
+                Hi there! Ask me about any historical figure, science concept, event, or object. 🚀
+            </div>
+        </div>
+
+        <div class="search-container" style="display: flex; gap: 5px; width: 100%;">
+            <input type="text" id="wiki-chat-input" placeholder="Type a topic (e.g. 'Photosynthesis', 'Black hole')..." style="margin: 0; padding: 8px 12px; font-size: 0.85rem;" onkeydown="if(event.key === 'Enter') sendWikiChatMessage()">
+            <button onclick="sendWikiChatMessage()" style="background-color: var(--accent-purple); color: #4a4a4a; padding: 0 15px; font-size: 0.85rem;">Ask</button>
+        </div>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header-row">
         <h2>📋 Multi-Slot Paste Bin</h2>
         <button class="expand-btn" onclick="toggleFocusMode(this.closest('.card'))">⛶</button>
     </div>
@@ -2289,6 +2309,117 @@ if (resizer && leftPane && container) {
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('mouseup', onMouseUp);
     });
+}
+// --- Wikipedia Chat Companion Logic ---
+async function sendWikiChatMessage() {
+    const inputEl = document.getElementById('wiki-chat-input');
+    const query = inputEl.value.trim();
+    if (!query) return;
+
+    // 1. Add User Message to UI
+    appendWikiMessage(query, 'user');
+    inputEl.value = ''; // clear input
+
+    // 2. Add temporary "Typing..." bot bubble
+    const typingId = appendWikiMessage('🔍 Searching Wikipedia library...', 'bot system-typing');
+
+    try {
+        // Step A: Search for the best matching article title
+        const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
+        const searchRes = await fetch(searchUrl);
+        const searchData = await searchRes.json();
+
+        if (!searchData.query.search || searchData.query.search.length === 0) {
+            removeWikiMessage(typingId);
+            appendWikiMessage(`😕 I couldn't find any Wikipedia article matching "${query}". Try different terms!`, 'bot');
+            return;
+        }
+
+        // Use the best matched page title
+        const matchedTitle = searchData.query.search[0].title;
+
+        // Step B: Fetch the REST summary for that specific page title
+        const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(matchedTitle.replace(/ /g, '_'))}`;
+        const summaryRes = await fetch(summaryUrl);
+        
+        if (!summaryRes.ok) {
+            throw new Error("Failed to pull summary page");
+        }
+        
+        const data = await summaryRes.json();
+
+        // 3. Remove typing indicator
+        removeWikiMessage(typingId);
+
+        // 4. Construct rich response with thumbnail if it exists
+        let replyHtml = `<strong>${data.title}</strong>: ${data.extract}`;
+        
+        if (data.thumbnail && data.thumbnail.source) {
+            replyHtml = `
+                <div style="display:flex; gap:10px; align-items:flex-start; margin-top:5px;">
+                    <img src="${data.thumbnail.source}" style="width: 50px; border-radius: 6px; flex-shrink: 0; border: 1px solid var(--accent-blue); object-fit: cover; max-height:65px;">
+                    <div>${replyHtml}</div>
+                </div>
+            `;
+        }
+
+        replyHtml += `<br><a href="${data.content_urls.desktop.page}" target="_blank" style="color: var(--title-color); font-weight:bold; font-size:0.75rem; text-decoration: underline; display: inline-block; margin-top:8px;">📖 Read full Wikipedia page →</a>`;
+
+        appendWikiMessage(replyHtml, 'bot', true);
+
+    } catch (err) {
+        console.error(err);
+        removeWikiMessage(typingId);
+        appendWikiMessage("⚠️ connection issue. Please make sure spelling is correct or check your network connection.", 'bot');
+    }
+}
+
+// Utility to append messages with beautiful scroll locks
+function appendWikiMessage(text, sender, isHTML = false) {
+    const chatBox = document.getElementById('wiki-chat-messages');
+    const msg = document.createElement('div');
+    const uniqueId = 'wiki-msg-' + Date.now() + Math.random().toString(36).substr(2, 5);
+    msg.id = uniqueId;
+    
+    // Style alignments
+    msg.style.padding = '8px 12px';
+    msg.style.borderRadius = '12px';
+    msg.style.fontSize = '0.85rem';
+    msg.style.maxWidth = '85%';
+    msg.style.wordBreak = 'break-word';
+    msg.style.lineHeight = '1.3';
+
+    if (sender === 'user') {
+        msg.style.alignSelf = 'flex-end';
+        msg.style.background = 'var(--accent-blue)';
+        msg.style.color = '#4a4a4a';
+        msg.style.borderRadius = '12px 12px 0 12px';
+    } else {
+        msg.style.alignSelf = 'flex-start';
+        msg.style.background = 'rgba(226, 187, 240, 0.2)';
+        msg.style.borderRadius = '12px 12px 12px 0';
+        msg.style.borderLeft = '3px solid var(--accent-purple)';
+    }
+
+    if (sender.includes('system-typing')) {
+        msg.style.fontStyle = 'italic';
+        msg.style.opacity = '0.7';
+    }
+
+    if (isHTML) {
+        msg.innerHTML = text;
+    } else {
+        msg.innerText = text;
+    }
+
+    chatBox.appendChild(msg);
+    chatBox.scrollTop = chatBox.scrollHeight; // Auto Scroll
+    return uniqueId;
+}
+
+function removeWikiMessage(id) {
+    const msg = document.getElementById(id);
+    if (msg) msg.remove();
 }
     </script>
 </body>
